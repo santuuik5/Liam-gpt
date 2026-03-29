@@ -11,7 +11,7 @@ const chatContainer = document.getElementById('chatContainer');
 // Configuración de la API de NVIDIA
 const API_KEY = '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';
 const API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MODEL = 'meta/llama-3.1-70b-instruct';
+const MODEL = 'nvidia/nemotron-3-super-120b-a12b';
 
 // Estado de la aplicación
 let chats = [];
@@ -182,9 +182,14 @@ async function callNvidiaAPI(chat) {
             body: JSON.stringify({
                 model: MODEL,
                 messages: apiMessages,
-                temperature: 0.7,
-                max_tokens: 1024,
-                stream: false
+                temperature: 1,
+                top_p: 0.95,
+                max_tokens: 16384,
+                extra_body: {
+                    chat_template_kwargs: { enable_thinking: true },
+                    reasoning_budget: 16384
+                },
+                stream: true
             })
         });
         
@@ -192,20 +197,64 @@ async function callNvidiaAPI(chat) {
             throw new Error(`Error ${response.status}: ${response.statusText}`);
         }
         
-        const data = await response.json();
-        const aiResponse = data.choices[0].message.content;
-        
         // Remover indicador de carga
         messagesContainer.removeChild(loadingElement);
         
-        // Agregar respuesta de IA
+        // Crear elemento para la respuesta de IA
+        const aiMessageDiv = document.createElement('div');
+        aiMessageDiv.className = 'message ai';
+        aiMessageDiv.innerHTML = `
+            <div class="message-content">
+                <div class="message-avatar" style="background-color: #19c37d">AI</div>
+                <div class="message-text"></div>
+            </div>
+        `;
+        messagesContainer.appendChild(aiMessageDiv);
+        
+        const messageTextElement = aiMessageDiv.querySelector('.message-text');
+        let fullContent = '';
+        
+        // Procesar stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6);
+                    if (dataStr.trim() === '[DONE]') continue;
+                    
+                    try {
+                        const data = JSON.parse(dataStr);
+                        
+                        if (data.choices && data.choices.length > 0) {
+                            const delta = data.choices[0].delta;
+                            
+                            // Manejar content
+                            if (delta.content) {
+                                fullContent += delta.content;
+                                messageTextElement.textContent = fullContent;
+                                scrollToBottom();
+                            }
+                        }
+                    } catch (e) {
+                        // Ignorar errores de parseo
+                    }
+                }
+            }
+        }
+        
+        // Agregar respuesta completa al historial
         chat.messages.push({
             role: 'ai',
-            content: aiResponse
+            content: fullContent
         });
-        
-        const aiMessageElement = createMessageElement('ai', aiResponse);
-        messagesContainer.appendChild(aiMessageElement);
         scrollToBottom();
         
         saveChatsToStorage();
