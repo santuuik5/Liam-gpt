@@ -8,6 +8,11 @@ const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const chatContainer = document.getElementById('chatContainer');
 
+// Configuración de la API de NVIDIA
+const API_KEY = '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';
+const API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const MODEL = 'meta/llama-3.1-70b-instruct';
+
 // Estado de la aplicación
 let chats = [];
 let currentChatId = null;
@@ -142,40 +147,85 @@ function sendMessage() {
     // Guardar cambios
     saveChatsToStorage();
     
-    // Simular respuesta de IA (aquí iría la llamada real a la API)
-    simulateAIResponse(chat);
+    // Llamar a la API de NVIDIA
+    callNvidiaAPI(chat);
 }
 
-function simulateAIResponse(chat) {
+async function callNvidiaAPI(chat) {
     // Mostrar indicador de "escribiendo..."
     const loadingElement = document.createElement('div');
     loadingElement.className = 'message ai';
     loadingElement.innerHTML = `
         <div class="message-content">
             <div class="message-avatar" style="background-color: #19c37d">AI</div>
-            <div class="message-text">...</div>
+            <div class="message-text typing">
+                <span></span><span></span><span></span>
+            </div>
         </div>
     `;
     messagesContainer.appendChild(loadingElement);
     scrollToBottom();
     
-    // Simular retraso de respuesta
-    setTimeout(() => {
-        messagesContainer.removeChild(loadingElement);
+    try {
+        // Preparar mensajes para la API
+        const apiMessages = chat.messages.map(msg => ({
+            role: msg.role === 'ai' ? 'assistant' : msg.role,
+            content: msg.content
+        }));
         
-        const response = "Esta es una respuesta simulada. Para conectar con un modelo real, necesitarás implementar la llamada a la API correspondiente.";
-        
-        chat.messages.push({
-            role: 'ai',
-            content: response
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                model: MODEL,
+                messages: apiMessages,
+                temperature: 0.7,
+                max_tokens: 1024,
+                stream: false
+            })
         });
         
-        const aiMessageElement = createMessageElement('ai', response);
+        if (!response.ok) {
+            throw new Error(`Error ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        const aiResponse = data.choices[0].message.content;
+        
+        // Remover indicador de carga
+        messagesContainer.removeChild(loadingElement);
+        
+        // Agregar respuesta de IA
+        chat.messages.push({
+            role: 'ai',
+            content: aiResponse
+        });
+        
+        const aiMessageElement = createMessageElement('ai', aiResponse);
         messagesContainer.appendChild(aiMessageElement);
         scrollToBottom();
         
         saveChatsToStorage();
-    }, 1000);
+        
+    } catch (error) {
+        console.error('Error calling NVIDIA API:', error);
+        messagesContainer.removeChild(loadingElement);
+        
+        const errorMessage = `Error al obtener respuesta: ${error.message}. Verifica tu conexión o la API key.`;
+        chat.messages.push({
+            role: 'ai',
+            content: errorMessage
+        });
+        
+        const aiMessageElement = createMessageElement('ai', errorMessage);
+        messagesContainer.appendChild(aiMessageElement);
+        scrollToBottom();
+        
+        saveChatsToStorage();
+    }
 }
 
 function renderChatHistory() {
